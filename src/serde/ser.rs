@@ -53,7 +53,7 @@ mod inner {
         Ok(lazy.collect_into(index_alloc, vec))
     }
 }
-pub use inner::serialize;
+pub use inner::{serialize, serialize_into};
 
 enum SpecifiedEncoder {
     Bool(BoolEncoder),
