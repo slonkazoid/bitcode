@@ -36,6 +36,22 @@ mod inner {
         })?;
         Ok(lazy.collect(index_alloc))
     }
+
+    /// Serializes a `T:` [`Serialize`] into a [`&mut Vec<u8>`].
+    ///
+    /// **Warning:** The format is incompatible with [`decode`][`crate::decode`] and subject to
+    /// change between major versions.
+    pub fn serialize_into<T: Serialize + ?Sized>(t: &T, vec: &mut Vec<u8>) -> Result<(), Error> {
+        let mut lazy = LazyEncoder::Unspecified {
+            reserved: NonZeroUsize::new(1),
+        };
+        let mut index_alloc = 0;
+        t.serialize(EncoderWrapper {
+            lazy: &mut lazy,
+            index_alloc: &mut index_alloc,
+        })?;
+        Ok(lazy.collect_into(index_alloc, vec))
+    }
 }
 pub use inner::serialize;
 
@@ -130,6 +146,24 @@ impl LazyEncoder {
             buffer.collect_into(&mut bytes);
         }
         bytes
+    }
+
+    /// Analogous [`Buffer::collect`], but requires `index_alloc` from serialization.
+    fn collect_into(&mut self, index_alloc: usize, bytes: &mut Vec<u8>) {
+        // If we just wrote out the buffers in field order we wouldn't be able to deserialize them
+        // since we might learn their types from serde in a different order.
+        //
+        // Consider the value: `[(vec![], 0u8), (vec![true], 1u8)]`
+        // We don't know that the Vec contains bool until we've already deserialized 0u8.
+        // Serde only tells us what is in sequences that aren't empty.
+        //
+        // Therefore, we have to reorder the buffers to match the order serde told us about them.
+        let mut buffers = default_box_slice(index_alloc);
+        self.reorder(&mut buffers);
+
+        for buffer in Vec::from(buffers).into_iter().flatten() {
+            buffer.collect_into(bytes);
+        }
     }
 
     fn reorder<'a>(&'a mut self, buffers: &mut [Option<&'a mut dyn Buffer>]) {
